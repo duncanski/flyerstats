@@ -85,7 +85,11 @@
                 <span id="dataFreshness">Connecting...</span>
             </div>
         </div>
-        <button class="close-btn" onclick="resetSearch()">✕</button>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+            <button onclick="shareFlight()" style="background:rgba(14,165,233,0.2); color:#0ea5e9; border:none; padding:0.5rem 1rem; border-radius:8px; font-weight:600; cursor:pointer; font-size:0.85rem;">🔗 Copy Link</button>
+            <button onclick="shareWhatsApp()" style="background:rgba(37,211,102,0.2); color:#25d366; border:none; padding:0.5rem 1rem; border-radius:8px; font-weight:600; cursor:pointer; font-size:0.85rem;">💬 WhatsApp</button>
+            <button class="close-btn" onclick="resetSearch()">✕</button>
+        </div>
     </div>
 
     <div id="offlineBadge">⚠️ Offline – Showing estimated position</div>
@@ -128,6 +132,22 @@
             document.body.appendChild(toast);
             setTimeout(() => toast.style.opacity = '1', 10);
             setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
+        }
+
+        function shareFlight() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                showToast('✈️ Flight link copied to clipboard!', 'success');
+            }).catch(() => {
+                showToast('Failed to copy link', 'error');
+            });
+        }
+
+        function shareWhatsApp() {
+            const url = encodeURIComponent(window.location.href);
+            const flightNum = currentFlightNum || 'this flight';
+            const text = encodeURIComponent(`Track flight ${flightNum} in real-time on FlyerStats:`);
+            window.open(`https://wa.me/?text=${text}%20${url}`, '_blank');
         }
 
         async function fetchFlightData(flightNumber) {
