@@ -55,11 +55,13 @@ async function fetchData() {
 }
 
 function shouldFetchNewData() { return !currentPlaneData || (Date.now()-lastFetchTime)>fetchInterval; }
+function scheduleNextFetch() { if(pollTimer)clearTimeout(pollTimer); pollTimer=setTimeout(fetchData,Math.max(0,fetchInterval-(Date.now()-lastFetchTime))); }
+
 function startSmoothAnimation() {
     if (!isPageVisible) { animationFrame = setTimeout(startSmoothAnimation, 1000); return; }
     if (currentPlaneData?.flights?.[0] && planeMarker && !isFlightLanded) {
         const f = currentPlaneData.flights[0];
-        const vel = f.velocity_kt || 0, hdg = f.heading_deg || 0;
+        const vel = f.velocity_kt || f.ground_speed || 0, hdg = f.heading_deg || f.track || 0;
         const lf = planeMarker.getLatLng();
         const wob = Math.sin(Date.now()/1000)*(vel/10000);
         planeMarker.setLatLng([lf.lat+Math.sin(hdg*Math.PI/180)*wob*0.0001, lf.lng+Math.cos(hdg*Math.PI/180)*wob*0.0001]);
@@ -94,10 +96,9 @@ function updateDataFreshness() {
     dot.className = sec<60 ? 'status-dot-live' : sec<300 ? 'status-dot-warning' : 'status-dot-offline';
 }
 setInterval(updateDataFreshness, 10000);
-
 function activateDeadReckoning() {
     if (!currentPlaneData?.flights?.[0]) return;
-    const f = currentPlaneData.flights[0], spd = f.velocity_kt||450, hdg = f.heading_deg||0;
+    const f = currentPlaneData.flights[0], spd = f.velocity_kt||450, hdg = f.heading_deg||f.track||0;
     offlineBadge.style.display = 'block';
     if (drTimer) clearInterval(drTimer);
     drTimer = setInterval(() => {
@@ -122,7 +123,7 @@ function createPlaneIcon(hdg=0) {
 }
 
 function updateMapPosition(f) {
-    const lat = f.latitude||f.currentLat||20, lon = f.longitude||f.currentLon||0, hdg = f.heading_deg||0;
+    const lat = f.latitude || f.currentLat || 20, lon = f.longitude || f.currentLon || 0, hdg = f.heading_deg || f.track || 0;
     const icon = createPlaneIcon(hdg);
     if (!planeMarker) {
         planeMarker = L.marker([lat,lon], {icon}).addTo(map);
@@ -135,11 +136,10 @@ function updateMapPosition(f) {
 function createPopupContent(f) {
     return `<div class="popup-content"><div class="popup-header">✈️ ${currentFlightNum}</div>
     <div class="popup-row"><span class="popup-label">Altitude</span><span class="popup-value">${(f.altitude_ft||0).toLocaleString()} ft</span></div>
-    <div class="popup-row"><span class="popup-label">Speed</span><span class="popup-value">${f.velocity_kt||0} kts</span></div>
-    <div class="popup-row"><span class="popup-label">Heading</span><span class="popup-value">${f.heading_deg||0}°</span></div>
-    <div class="popup-row"><span class="popup-label">Origin</span><span class="popup-value">${f.origin_airport||'---'}</span></div>
-    <div class="popup-row"><span class="popup-label">Destination</span><span class="popup-value">${f.destination_airport||'---'}</span></div>
-    <div class="popup-row"><span class="popup-label">ETA</span><span class="popup-value">${f.estimated_arrival_time?new Date(f.estimated_arrival_time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'---'}</span></div></div>`;
+    <div class="popup-row"><span class="popup-label">Speed</span><span class="popup-value">${(f.velocity_kt||0).toFixed(1)} kts</span></div>
+    <div class="popup-row"><span class="popup-label">Heading</span><span class="popup-value">${(f.heading_deg||f.track||0).toFixed(1)}°</span></div>
+    <div class="popup-row"><span class="popup-label">Hex/ICAO</span><span class="popup-value">${f.hex || f.icao24 || '---'}</span></div>
+    <div class="popup-row"><span class="popup-label">Last Seen</span><span class="popup-value">${f.timestamp ? new Date(f.timestamp).toLocaleTimeString() : '---'}</span></div></div>`;
 }
 
 function showPopup() {
@@ -156,10 +156,10 @@ function successAction(fn, fdata) {
     currentFlightNum = fn; currentPlaneData = {flights:[fdata]}; lastFetchTime = Date.now();
     searchOverlay.style.opacity='0'; searchOverlay.style.pointerEvents='none';
     document.getElementById('uiFlightCode').textContent=fn;
-    document.getElementById('uiRoute').textContent=`${fdata.origin.code} ➔ ${fdata.dest.code}`;
+    document.getElementById('uiRoute').textContent=`${fdata.origin_code||'???'} ➔ ${fdata.dest_code||'???'}`;
     updateURL(fn);
-    map.flyTo([fdata.currentLat||fdata.origin.lat, fdata.currentLon||fdata.origin.lon], 7, {duration:2.5});
-    setTimeout(()=>{ trackerUI.classList.add('visible'); updateMapPosition(fdata); startETACountdown(fdata.eta); fetchData(); startSmoothAnimation(); }, 2500);
+    map.flyTo([fdata.latitude||20, fdata.longitude||0], 8, {duration:2.5});
+    setTimeout(()=>{ trackerUI.classList.add('visible'); updateMapPosition(fdata); startETACountdown(fdata.estimated_arrival_time||new Date(Date.now()+10800000).toISOString()); fetchData(); startSmoothAnimation(); }, 2500);
 }
 
 function resetSearch() {
@@ -177,10 +177,19 @@ function showError(msg) { errorMessage.textContent=msg; errorMessage.classList.a
 
 function loadFlightFromURL() {
     const p = window.location.pathname.split('/'); const fn = p[p.length-1];
-    if (fn && /^[A-Z0-9]{2,6}$/i.test(fn)) {
+    // FIXED REGEX HERE: Allow up to 8 characters
+    if (fn && /^[A-Z0-9]{2,8}$/i.test(fn)) {
         const f = fn.toUpperCase(); flightInput.value=f; loader.classList.add('show');
         fetchFlightData(f).then(d=>{const fl=d.flights?.[0];
-            if(fl){successAction(f,{origin:{code:fl.origin_airport||'---',lat:1.36,lon:103.99},dest:{code:fl.destination_airport||'---'},status:fl.status||'in_air',eta:fl.estimated_arrival_time||new Date(Date.now()+28800000).toISOString(),currentLat:fl.latitude,currentLon:fl.longitude,altitude_ft:fl.altitude_ft,velocity_kt:fl.velocity_kt,heading_deg:fl.heading_deg});}
+            if(fl){
+                successAction(f, {
+                    origin_code: '---', dest_code: '---',
+                    latitude: fl.latitude, longitude: fl.longitude,
+                    altitude_ft: fl.altitude_ft, velocity_kt: fl.velocity_kt,
+                    heading_deg: fl.heading_deg, track: fl.heading_deg, hex: fl.hex,
+                    timestamp: fl.timestamp, estimated_arrival_time: new Date(Date.now()+7200000).toISOString()
+                });
+            }
             else{loader.classList.remove('show');}
         }).catch(()=>loader.classList.remove('show'));
     }
@@ -189,16 +198,24 @@ function loadFlightFromURL() {
 flightInput.addEventListener('keypress', async e => {
     if(e.key!=='Enter')return;
     const fn=e.target.value.trim().toUpperCase();
-    if(!/^[A-Z0-9]{2,6}$/.test(fn))return showError('Invalid format');
+    // FIXED REGEX HERE: Allow up to 8 characters
+    if(!/^[A-Z0-9]{2,8}$/.test(fn))return showError('Invalid format');
     loader.classList.add('show');
     try{const d=await fetchFlightData(fn);const fl=d.flights?.[0];
-        if(fl){successAction(fn,{origin:{code:fl.origin_airport||'---',lat:1.36,lon:103.99},dest:{code:fl.destination_airport||'---'},status:fl.status||'in_air',eta:fl.estimated_arrival_time||new Date(Date.now()+28800000).toISOString(),currentLat:fl.latitude,currentLon:fl.longitude,altitude_ft:fl.altitude_ft,velocity_kt:fl.velocity_kt,heading_deg:fl.heading_deg});}
+        if(fl){
+            successAction(fn, {
+                origin_code: '---', dest_code: '---',
+                latitude: fl.latitude, longitude: fl.longitude,
+                altitude_ft: fl.altitude_ft, velocity_kt: fl.velocity_kt,
+                heading_deg: fl.heading_deg, track: fl.heading_deg, hex: fl.hex,
+                timestamp: fl.timestamp, estimated_arrival_time: new Date(Date.now()+7200000).toISOString()
+            });
+        }
         else if(FLIGHT_DB[fn]){successAction(fn,FLIGHT_DB[fn]);}
         else{throw new Error('Not found');}
-    }catch(err){if(FLIGHT_DB[fn]){successAction(fn,FLIGHT_DB[fn]);}else{showError('Flight not found.');}}
+    }catch(err){if(FLIGHT_DB[fn]){successAction(fn,FLIGHT_DB[fn]);}else{showError('Flight not found. Try a live flight like RYR9911.');}}
     loader.classList.remove('show');
 });
 
 document.addEventListener('visibilitychange',()=>{isPageVisible=document.visibilityState==='visible';if(isPageVisible&&currentFlightNum){fetchData();startSmoothAnimation();}});
 if(window.location.pathname.includes('/track/'))loadFlightFromURL();
-function scheduleNextFetch() { if(pollTimer)clearTimeout(pollTimer); pollTimer=setTimeout(fetchData,Math.max(0,fetchInterval-(Date.now()-lastFetchTime))); }
