@@ -1,0 +1,12 @@
+{
+  "name": "flyerstats",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "resend": "^3.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}
