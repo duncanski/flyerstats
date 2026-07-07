@@ -296,6 +296,11 @@
             map.panTo(latLng, { animate: true, duration: 0.5 });
         }
 
+        function updateURL(flightNumber) {
+            const newUrl = `${window.location.origin}/track/${flightNumber}`;
+            window.history.pushState({}, '', newUrl);
+        }
+
         function successAction(flightNumber, flightData) {
             currentFlightNum = flightNumber;
             currentPlaneData = { flights: [flightData] };
@@ -304,6 +309,7 @@
             searchOverlay.style.pointerEvents = 'none';
             document.getElementById('uiFlightCode').textContent = flightNumber;
             document.getElementById('uiRoute').textContent = `${flightData.origin.code} ➔ ${flightData.dest.code}`;
+            updateURL(flightNumber);
             map.flyTo([flightData.origin.lat, flightData.origin.lon], 8, { duration: 2.5 });
             setTimeout(() => {
                 trackerUI.classList.add('visible');
@@ -328,12 +334,40 @@
             searchOverlay.style.pointerEvents = 'all';
             map.flyTo([20, 0], 2, { duration: 1.5 });
             setTimeout(() => { flightInput.value = ''; document.getElementById('uiFlightCode').textContent = '---'; document.getElementById('uiRoute').textContent = '--- ➔ ---'; }, 1500);
+            window.history.pushState({}, '', window.location.origin);
         }
 
         function showError(msg) {
             errorMessage.textContent = msg;
             errorMessage.classList.add('show');
             setTimeout(() => errorMessage.classList.remove('show'), 3000);
+        }
+
+        function loadFlightFromURL() {
+            const pathParts = window.location.pathname.split('/');
+            const flightNum = pathParts[pathParts.length - 1];
+            if (flightNum && /^[A-Z0-9]{2,6}$/i.test(flightNum)) {
+                const formattedFlight = flightNum.toUpperCase();
+                flightInput.value = formattedFlight;
+                loader.classList.add('show');
+                fetchFlightData(formattedFlight).then(data => {
+                    const flight = data.flights?.[0];
+                    if (flight) {
+                        successAction(formattedFlight, {
+                            origin: { code: flight.origin_airport || '---', lat: flight.latitude || 1.36, lon: flight.longitude || 103.99 },
+                            dest: { code: flight.destination_airport || '---' },
+                            status: flight.status || 'in_air',
+                            eta: flight.estimated_arrival_time || new Date(Date.now()+28800000).toISOString(),
+                            currentLat: flight.latitude,
+                            currentLon: flight.longitude
+                        });
+                    } else {
+                        loader.classList.remove('show');
+                    }
+                }).catch(err => {
+                    loader.classList.remove('show');
+                });
+            }
         }
 
         flightInput.addEventListener('keypress', async (e) => {
@@ -369,6 +403,11 @@
             isPageVisible = document.visibilityState === 'visible';
             if (isPageVisible && currentFlightNum) { fetchData(); startSmoothAnimation(); }
         });
+
+        // Check URL on page load
+        if (window.location.pathname.includes('/track/')) {
+            loadFlightFromURL();
+        }
     </script>
 </body>
 </html>
